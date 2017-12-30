@@ -639,3 +639,24 @@ int git_odb_backend_pack(git_odb_backend **backend_out, const char *objects_dir)
 
 	return error;
 }
+
+size_t git_packodb_packs_num(struct pack_backend *backend)
+{
+  return backend->packs.length;
+}
+
+int git_packodb_getpack(struct git_pack_file **out, struct pack_backend* backend, size_t pos)
+{
+  struct git_pack_file *p;
+
+  assert(out && backend);
+  p = git_vector_get(&backend->packs, pos);
+
+  if (p) {
+	*out = p;
+	return 0;
+  }
+
+  giterr_set(GITERR_ODB, "no ODB backend loaded at index %" PRIuZ, pos);
+  return GIT_ENOTFOUND;
+}

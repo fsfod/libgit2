@@ -235,6 +235,16 @@ GIT_EXTERN(int) git_packbuilder_set_callbacks(
  */
 GIT_EXTERN(void) git_packbuilder_free(git_packbuilder *pb);
 
+typedef int(*git_pack_foreach_cb)(const git_oid *id, git_off_t offset, void *payload);
+GIT_EXTERN(int) git_packfile_foreach_entry2(struct git_pack_file *p, git_pack_foreach_cb cb, void *payload);
+
+GIT_EXTERN(size_t) git_packfile_obj_count(struct git_pack_file *p);
+GIT_EXTERN(int) git_packfile_get_entry(const git_oid **id, git_off_t *offset, struct git_pack_file *p, uint32_t n);
+
+GIT_EXTERN(int) git_packfile_get_header(size_t *size_p, git_otype *type_p, struct git_pack_file *p, git_off_t offset);
+GIT_EXTERN(int) git_packfile_resolve_header(size_t *size_p, git_otype *type_p, struct git_pack_file *p, git_off_t offset);;
+GIT_EXTERN(int) git_packfile_unpack(struct git_rawobj *obj, struct git_pack_file *p, git_off_t *obj_offset);
+
 /** @} */
 GIT_END_DECL
 #endif

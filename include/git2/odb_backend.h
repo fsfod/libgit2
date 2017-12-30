@@ -129,6 +129,28 @@ struct git_odb_writepack {
 	void (*free)(git_odb_writepack *writepack);
 };
 
+struct pack_backend;
+
+/**
+* Get the number of pack files in the ODB
+*
+* @param odb object database
+* @return number of pack files in the ODB
+*/
+GIT_EXTERN(size_t) git_packodb_packs_num(struct pack_backend *odb);
+
+/**
+* Lookup an packfile object by index
+*
+* @param out output pointer to ODB backend at pos
+* @param odb object database
+* @param pos index into object database backend list
+* @return 0 on success; GIT_ENOTFOUND if pos is invalid; other errors < 0
+*/
+GIT_EXTERN(int) git_packodb_getpack(struct git_pack_file **out, struct pack_backend* backend, size_t pos);
+
+GIT_EXTERN(int) git_pack_foreach_entry2();
+
 GIT_END_DECL
 
 #endif

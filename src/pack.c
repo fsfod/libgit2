@@ -13,8 +13,10 @@
 #include "mwindow.h"
 #include "fileops.h"
 #include "oid.h"
+#include "git2/pack.h"
 
 #include <zlib.h>
+
 
 static int packfile_open(struct git_pack_file *p);
 static git_off_t nth_packed_object_offset(const struct git_pack_file *p, uint32_t n);
@@ -471,6 +473,19 @@ int git_packfile_unpack_header(
 
 	*curpos += used;
 	return 0;
+}
+
+int git_packfile_get_header(size_t *size_p,
+  git_otype *type_p,
+  struct git_pack_file *p,
+  git_off_t offset)
+{
+  git_mwindow *w_curs = NULL;
+  git_off_t curpos = offset;
+  int error;
+  if (p->mwf.fd == -1 && (error = packfile_open(p)) < 0)
+	return error;
+  return git_packfile_unpack_header(size_p, type_p, &p->mwf, &w_curs, &curpos);
 }
 
 int git_packfile_resolve_header(
@@ -1269,6 +1284,104 @@ int git_pack_foreach_entry(
 			return giterr_set_after_callback(error);
 
 	return error;
+}
+
+size_t git_packfile_obj_count(struct git_pack_file *p)
+{
+  if (p->index_version == -1) {
+	int error;
+
+	if ((error = pack_index_open(p)) < 0)
+	  return error;
+	assert(p->index_map.data);
+  }
+  return p->num_objects;
+}
+
+int git_packfile_get_entry(const git_oid **id, git_off_t *offset, struct git_pack_file *p, uint32_t n)
+{
+  const uint32_t *level1_ofs;
+  const unsigned char *index;
+  unsigned stride;
+  int pos, found = 0;
+
+  if (p->index_version == -1) {
+	int error;
+
+	if ((error = pack_index_open(p)) < 0)
+	  return error;
+	assert(p->index_map.data);
+  }
+
+  index = p->index_map.data;
+  level1_ofs = p->index_map.data;
+
+  if (p->index_version > 1) {
+	level1_ofs += 2;
+	index += 8;
+  }
+
+  index += 4 * 256;
+
+  if (p->index_version > 1) {
+	stride = 20;
+  } else {
+	stride = 24;
+	index += 4;
+  }
+
+  *id = (git_oid*)(index + n * stride);
+  *offset = nth_packed_object_offset(p, n);
+  if (offset < 0) {
+	giterr_set(GITERR_ODB, "packfile index is corrupt");
+	return -1;
+  }
+  return GITERR_NONE;
+}
+
+int git_packfile_foreach_entry2(struct git_pack_file *p, git_pack_foreach_cb cb, void *payload)
+{
+  const uint32_t *level1_ofs;
+  const unsigned char *index;
+  unsigned stride;
+  int pos, found = 0;
+
+  if (p->index_version == -1) {
+	int error;
+
+	if ((error = pack_index_open(p)) < 0)
+	  return error;
+	assert(p->index_map.data);
+  }
+
+  index = p->index_map.data;
+  level1_ofs = p->index_map.data;
+
+  if (p->index_version > 1) {
+	level1_ofs += 2;
+	index += 8;
+  }
+
+  index += 4 * 256;
+
+  if (p->index_version > 1) {
+	stride = 20;
+  } else {
+	stride = 24;
+	index += 4;
+  }
+
+  for(int i = 0; i != p->num_objects ;i++) {
+	git_oid *id = (git_oid*)(index + i * stride);
+	git_off_t offset = nth_packed_object_offset(p, i);
+	if (offset < 0) {
+	  giterr_set(GITERR_ODB, "packfile index is corrupt");
+	  return -1;
+	}
+	cb(id, offset, payload);
+  }
+
+  return 0;
 }
 
 static int pack_entry_find_offset(
