@@ -16,9 +16,12 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
-#include "git-compat-util.h"
+#define INCL_EXTRA_HTON_FUNCTIONS
+#include "git2.h"
 #include "ewok.h"
-#include "strbuf.h"
+#include <filebuf.h>
+
+#include <Winsock2.h>
 
 int ewah_serialize_native(struct ewah_bitmap *self, int fd)
 {
@@ -112,8 +115,8 @@ int ewah_serialize(struct ewah_bitmap *self, int fd)
 
 static int write_strbuf(void *user_data, const void *data, size_t len)
 {
-	struct strbuf *sb = user_data;
-	strbuf_add(sb, data, len);
+	struct git_buf *sb = (struct git_buf *)user_data;
+	git_buf_put(sb, data, len);
 	return len;
 }
 
@@ -127,13 +130,13 @@ int ewah_read_mmap(struct ewah_bitmap *self, const void *map, size_t len)
 	const uint8_t *ptr = map;
 	size_t i;
 
-	self->bit_size = get_be32(ptr);
+	self->bit_size = ntohl(*(int32_t*)ptr);
 	ptr += sizeof(uint32_t);
 
-	self->buffer_size = self->alloc_size = get_be32(ptr);
+	self->buffer_size = self->alloc_size = ntohl(*(int32_t*)ptr);
 	ptr += sizeof(uint32_t);
 
-	REALLOC_ARRAY(self->buffer, self->alloc_size);
+	git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
 
 	/*
 	 * Copy the raw data for the bitmap as a whole chunk;
@@ -147,7 +150,7 @@ int ewah_read_mmap(struct ewah_bitmap *self, const void *map, size_t len)
 	for (i = 0; i < self->buffer_size; ++i)
 		self->buffer[i] = ntohll(self->buffer[i]);
 
-	self->rlw = self->buffer + get_be32(ptr);
+	self->rlw = self->buffer + ntohl(*(int32_t*)ptr);
 
 	return (3 * 4) + (self->buffer_size * 8);
 }
@@ -175,7 +178,7 @@ int ewah_deserialize(struct ewah_bitmap *self, int fd)
 		return -1;
 
 	self->buffer_size = self->alloc_size = (size_t)ntohl(word_count);
-	REALLOC_ARRAY(self->buffer, self->alloc_size);
+	git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
 
 	/** 64 bit x N -- compressed words */
 	buffer = self->buffer;

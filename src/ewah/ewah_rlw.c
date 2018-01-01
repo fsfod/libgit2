@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
-#include "git-compat-util.h"
+#include "common.h"
 #include "ewok.h"
 #include "ewok_rlw.h"
 

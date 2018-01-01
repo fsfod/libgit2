@@ -16,7 +16,7 @@
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, see <http://www.gnu.org/licenses/>.
  */
-#include "git-compat-util.h"
+#include "common.h"
 #include "ewok.h"
 #include "ewok_rlw.h"
 
@@ -38,7 +38,7 @@ static inline void buffer_grow(struct ewah_bitmap *self, size_t new_size)
 		return;
 
 	self->alloc_size = new_size;
-	REALLOC_ARRAY(self->buffer, self->alloc_size);
+	git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
 	self->rlw = self->buffer + (rlw_offset / sizeof(eword_t));
 }
 

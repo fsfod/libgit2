@@ -24,8 +24,8 @@
 
 struct bitmap *bitmap_new(void)
 {
-	struct bitmap *bitmap = xmalloc(sizeof(struct bitmap));
-	bitmap->words = xcalloc(32, sizeof(eword_t));
+	struct bitmap *bitmap = git__malloc(sizeof(struct bitmap));
+	bitmap->words = git__calloc(32, sizeof(eword_t));
 	bitmap->word_alloc = 32;
 	return bitmap;
 }
@@ -37,7 +37,7 @@ void bitmap_set(struct bitmap *self, size_t pos)
 	if (block >= self->word_alloc) {
 		size_t old_size = self->word_alloc;
 		self->word_alloc = block * 2;
-		REALLOC_ARRAY(self->words, self->word_alloc);
+		git__reallocarray(self->words, sizeof(eword_t), self->word_alloc);
 		memset(self->words + old_size, 0x0,
 			(self->word_alloc - old_size) * sizeof(eword_t));
 	}
@@ -87,6 +87,26 @@ struct ewah_bitmap *bitmap_to_ewah(struct bitmap *bitmap)
 	return ewah;
 }
 
+#define alloc_nr(x) (((x)+16)*3/2)
+
+/*
+* Realloc the buffer pointed at by variable 'x' so that it can hold
+* at least 'nr' entries; the number of entries currently allocated
+* is 'alloc', using the standard growing factor alloc_nr() macro.
+*
+* DO NOT USE any expression with side-effect for 'x', 'nr', or 'alloc'.
+*/
+#define ALLOC_GROW(x, nr, alloc) \
+	do { \
+		if ((nr) > alloc) { \
+			if (alloc_nr(alloc) < (nr)) \
+				alloc = (nr); \
+			else \
+				alloc = alloc_nr(alloc); \
+			git__reallocarray(x, sizeof(*(x)), alloc); \
+		} \
+	} while (0)
+
 struct bitmap *ewah_to_bitmap(struct ewah_bitmap *ewah)
 {
 	struct bitmap *bitmap = bitmap_new();
@@ -126,7 +146,7 @@ void bitmap_or_ewah(struct bitmap *self, struct ewah_bitmap *other)
 
 	if (self->word_alloc < other_final) {
 		self->word_alloc = other_final;
-		REALLOC_ARRAY(self->words, self->word_alloc);
+		git__reallocarray(self->words, sizeof(eword_t), self->word_alloc);
 		memset(self->words + original_size, 0x0,
 			(self->word_alloc - original_size) * sizeof(eword_t));
 	}
@@ -173,19 +193,19 @@ size_t bitmap_popcount(struct bitmap *self)
 
 int bitmap_equals(struct bitmap *self, struct bitmap *other)
 {
-	struct bitmap *big, *small;
+	struct bitmap *big, *smallb;
 	size_t i;
 
 	if (self->word_alloc < other->word_alloc) {
-		small = self;
+	  smallb = self;
 		big = other;
 	} else {
-		small = other;
+	  smallb = other;
 		big = self;
 	}
 
-	for (i = 0; i < small->word_alloc; ++i) {
-		if (small->words[i] != big->words[i])
+	for (i = 0; i < smallb->word_alloc; ++i) {
+		if (smallb->words[i] != big->words[i])
 			return 0;
 	}
 
