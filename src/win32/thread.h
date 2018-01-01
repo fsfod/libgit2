@@ -16,7 +16,7 @@
 #	define GIT_RESTRICT __restrict__
 #endif
 
-typedef struct {
+typedef struct git_thread {
 	HANDLE thread;
 	void *(*proc)(void *);
 	void *param;
@@ -37,12 +37,12 @@ typedef struct {
 
 int git_threads_init(void);
 
-int git_thread_create(git_thread *GIT_RESTRICT,
+GIT_EXTERN(int)  git_thread_create(git_thread *GIT_RESTRICT,
 	void *(*) (void *),
 	void *GIT_RESTRICT);
-int git_thread_join(git_thread *, void **);
-size_t git_thread_currentid(void);
-void git_thread_exit(void *);
+GIT_EXTERN(int)  git_thread_join(git_thread *, void **);
+GIT_EXTERN(size_t) git_thread_currentid(void);
+GIT_EXTERN(void) git_thread_exit(void *);
 
 int git_mutex_init(git_mutex *GIT_RESTRICT mutex);
 int git_mutex_free(git_mutex *);
