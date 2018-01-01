@@ -245,6 +245,9 @@ GIT_EXTERN(int) git_packfile_get_header(size_t *size_p, git_otype *type_p, struc
 GIT_EXTERN(int) git_packfile_resolve_header(size_t *size_p, git_otype *type_p, struct git_pack_file *p, git_off_t offset);;
 GIT_EXTERN(int) git_packfile_unpack(struct git_rawobj *obj, struct git_pack_file *p, git_off_t *obj_offset);
 
+GIT_EXTERN(void*) git_packfile_map_wholefile(struct git_pack_file *p);
+GIT_EXTERN(int) git_packfile_unmap_wholefile(struct git_pack_file *p, struct git_mwindow* window);
+
 /** @} */
 GIT_END_DECL
 #endif

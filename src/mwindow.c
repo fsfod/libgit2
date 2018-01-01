@@ -252,7 +252,7 @@ static git_mwindow *new_window(
 	git_mwindow_file *mwf,
 	git_file fd,
 	git_off_t size,
-	git_off_t offset)
+	git_off_t offset, int ignore_win_limit)
 {
 	git_mwindow_ctl *ctl = &mem_ctl;
 	size_t walign = git_mwindow__window_size / 2;
@@ -268,7 +268,7 @@ static git_mwindow *new_window(
 	w->offset = (offset / walign) * walign;
 
 	len = size - w->offset;
-	if (len > (git_off_t)git_mwindow__window_size)
+	if (!ignore_win_limit && len > (git_off_t)git_mwindow__window_size)
 		len = (git_off_t)git_mwindow__window_size;
 
 	ctl->mapped += (size_t)len;
@@ -313,12 +313,13 @@ static git_mwindow *new_window(
  * Open a new window, closing the least recenty used until we have
  * enough space. Don't forget to add it to your list
  */
-unsigned char *git_mwindow_open(
+unsigned char *mwindow_open(
 	git_mwindow_file *mwf,
 	git_mwindow **cursor,
 	git_off_t offset,
 	size_t extra,
-	unsigned int *left)
+	unsigned int *left,
+	int skiplimit)
 {
 	git_mwindow_ctl *ctl = &mem_ctl;
 	git_mwindow *w = *cursor;
@@ -344,7 +345,7 @@ unsigned char *git_mwindow_open(
 		 * one.
 		 */
 		if (!w) {
-			w = new_window(mwf, mwf->fd, mwf->size, offset);
+			w = new_window(mwf, mwf->fd, mwf->size, offset, skiplimit);
 			if (w == NULL) {
 				git_mutex_unlock(&git__mwindow_mutex);
 				return NULL;
@@ -368,6 +369,26 @@ unsigned char *git_mwindow_open(
 
 	git_mutex_unlock(&git__mwindow_mutex);
 	return (unsigned char *) w->window_map.data + offset;
+}
+
+unsigned char *git_mwindow_open(
+  git_mwindow_file *mwf,
+  git_mwindow **cursor,
+  git_off_t offset,
+  size_t extra,
+  unsigned int *left)
+{
+  return mwindow_open(mwf, cursor, offset, extra, left, 0);
+}
+
+unsigned char *git_mwindow_open_nolimit(
+  git_mwindow_file *mwf,
+  git_mwindow **cursor,
+  git_off_t offset,
+  size_t extra,
+  unsigned int *left)
+{
+  return mwindow_open(mwf, cursor, offset, extra, left, 1);
 }
 
 int git_mwindow_file_register(git_mwindow_file *mwf)

@@ -369,8 +369,54 @@ static unsigned char *pack_window_open(
 	if (offset < 0)
 		return NULL;
 
+	if ((*w_cursor == NULL || *w_cursor == p->wholefile) && p->wholefile) {
+	  *w_cursor = p->wholefile;
+	  if (left)
+		*left = (unsigned int)(p->mwf.size - offset);
+	  return ((char *)p->wholefile->window_map.data) + offset;
+	}
+
 	return git_mwindow_open(&p->mwf, w_cursor, offset, 20, left);
  }
+
+static void pack_window_close(struct git_pack_file *p, git_mwindow **w_cursor)
+{
+  if (*w_cursor == NULL) {
+	return;
+  }
+
+  if (*w_cursor == p->wholefile && p->wholefile) {
+	*w_cursor = NULL;
+  } else {
+	git_mwindow_close(w_cursor);
+  }
+}
+
+void* git_packfile_map_wholefile(struct git_pack_file *p)
+{
+  if (p->mwf.fd == -1 && packfile_open(p) < 0)
+	return NULL;
+  
+  git_mwindow *w_cursor = NULL;
+  void* start = git_mwindow_open_nolimit(&p->mwf, &w_cursor, 0, p->mwf.size, NULL);
+  if (!start) {
+	return NULL;
+  }
+  assert(w_cursor->window_map.len == p->mwf.size);
+  p->wholefile = w_cursor;
+  return w_cursor;
+}
+
+int git_packfile_unmap_wholefile(struct git_pack_file *p, struct git_mwindow* window)
+{
+  if (p->mwf.fd == -1) {
+	return 0;
+  }
+  git_mwindow *w_cursor = window;
+  git_mwindow_close(&w_cursor);
+  p->wholefile = NULL;
+  return 0;
+}
 
 /*
  * The per-object header is a pretty dense thing, which is
@@ -475,6 +521,40 @@ int git_packfile_unpack_header(
 	return 0;
 }
 
+static int packfile_unpack_header(
+  size_t *size_p,
+  git_otype *type_p,
+  struct git_pack_file *p,
+  git_mwindow **w_curs,
+  git_off_t *curpos)
+{
+  unsigned char *base;
+  unsigned int left;
+  unsigned long used;
+  int ret;
+
+  /* pack_window_open() assures us we have [base, base + 20) available
+  * as a range that we can look at at. (Its actually the hash
+  * size that is assured.) With our object header encoding
+  * the maximum deflated object size is 2^137, which is just
+  * insane, so we know won't exceed what we have been given.
+  */
+  /*	base = pack_window_open(p, w_curs, *curpos, &left); */
+  base = pack_window_open(p, w_curs, *curpos, &left);
+  if (base == NULL)
+	return GIT_EBUFS;
+
+  ret = packfile_unpack_header1(&used, size_p, type_p, base, left);
+  pack_window_close(p, w_curs);
+  if (ret == GIT_EBUFS)
+	return ret;
+  else if (ret < 0)
+	return packfile_error("header length is zero");
+
+  *curpos += used;
+  return 0;
+}
+
 int git_packfile_get_header(size_t *size_p,
   git_otype *type_p,
   struct git_pack_file *p,
@@ -482,10 +562,11 @@ int git_packfile_get_header(size_t *size_p,
 {
   git_mwindow *w_curs = NULL;
   git_off_t curpos = offset;
+
   int error;
   if (p->mwf.fd == -1 && (error = packfile_open(p)) < 0)
 	return error;
-  return git_packfile_unpack_header(size_p, type_p, &p->mwf, &w_curs, &curpos);
+  return packfile_unpack_header(size_p, type_p, p, &w_curs, &curpos);
 }
 
 int git_packfile_resolve_header(
@@ -501,7 +582,7 @@ int git_packfile_resolve_header(
 	git_off_t base_offset;
 	int error;
 
-	error = git_packfile_unpack_header(&size, &type, &p->mwf, &w_curs, &curpos);
+	error = packfile_unpack_header(&size, &type, p, &w_curs, &curpos);
 	if (error < 0)
 		return error;
 
@@ -510,7 +591,7 @@ int git_packfile_resolve_header(
 		git_packfile_stream stream;
 
 		base_offset = get_delta_base(p, &w_curs, &curpos, type, offset);
-		git_mwindow_close(&w_curs);
+		pack_window_close(p, &w_curs);
 		if ((error = git_packfile_stream_open(&stream, p, curpos)) < 0)
 			return error;
 		error = git_delta_read_header_fromstream(&base_size, size_p, &stream);
@@ -524,13 +605,13 @@ int git_packfile_resolve_header(
 
 	while (type == GIT_OBJ_OFS_DELTA || type == GIT_OBJ_REF_DELTA) {
 		curpos = base_offset;
-		error = git_packfile_unpack_header(&size, &type, &p->mwf, &w_curs, &curpos);
+		error = packfile_unpack_header(&size, &type, p, &w_curs, &curpos);
 		if (error < 0)
 			return error;
 		if (type != GIT_OBJ_OFS_DELTA && type != GIT_OBJ_REF_DELTA)
 			break;
 		base_offset = get_delta_base(p, &w_curs, &curpos, type, base_offset);
-		git_mwindow_close(&w_curs);
+		pack_window_close(p, &w_curs);	
 	}
 	*type_p = type;
 
@@ -591,7 +672,7 @@ static int pack_dependency_chain(git_dependency_chain *chain_out,
 
 		elem->base_key = obj_offset;
 
-		error = git_packfile_unpack_header(&size, &type, &p->mwf, &w_curs, &curpos);
+		error = packfile_unpack_header(&size, &type, p, &w_curs, &curpos);
 
 		if (error < 0)
 			goto on_error;
@@ -605,7 +686,7 @@ static int pack_dependency_chain(git_dependency_chain *chain_out,
 			break;
 
 		base_offset = get_delta_base(p, &w_curs, &curpos, type, obj_offset);
-		git_mwindow_close(&w_curs);
+		pack_window_close(p, &w_curs);
 
 		if (base_offset == 0) {
 			error = packfile_error("delta offset is zero");
@@ -833,7 +914,7 @@ ssize_t git_packfile_stream_read(git_packfile_stream *obj, void *buffer, size_t 
 	obj->zstream.next_in = in;
 
 	st = inflate(&obj->zstream, Z_SYNC_FLUSH);
-	git_mwindow_close(&obj->mw);
+	pack_window_close(obj->p, &obj->mw);
 
 	obj->curpos += obj->zstream.next_in - in;
 	written = len - obj->zstream.avail_out;
@@ -895,7 +976,7 @@ static int packfile_unpack_compressed(
 		in = pack_window_open(p, w_curs, *curpos, &stream.avail_in);
 		stream.next_in = in;
 		st = inflate(&stream, Z_FINISH);
-		git_mwindow_close(w_curs);
+		pack_window_close(p, w_curs);
 
 		if (!stream.avail_out)
 			break; /* the payload is larger than it should be */
