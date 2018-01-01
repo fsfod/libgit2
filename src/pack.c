@@ -867,7 +867,7 @@ cleanup:
 static void *use_git_alloc(void *opaq, unsigned int count, unsigned int size)
 {
 	GIT_UNUSED(opaq);
-	return git__calloc(count, size);
+	return git__malloc(count * size);
 }
 
 static void use_git_free(void *opaq, void *ptr)
