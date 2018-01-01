@@ -57,7 +57,7 @@ int git_mwindow_get_pack(struct git_pack_file **out, const char *path)
 	if ((error = git_packfile__name(&packname, path)) < 0)
 		return error;
 
-	if (git_mutex_lock(&git__mwindow_mutex) < 0) {
+	if (git_rwlock_wrlock(&git__mwindow_mutex) < 0) {
 		giterr_set(GITERR_OS, "failed to lock mwindow mutex");
 		return -1;
 	}
@@ -69,21 +69,21 @@ int git_mwindow_get_pack(struct git_pack_file **out, const char *path)
 		pack = git_strmap_value_at(git__pack_cache, pos);
 		git_atomic_inc(&pack->refcount);
 
-		git_mutex_unlock(&git__mwindow_mutex);
+		git_rwlock_wrunlock(&git__mwindow_mutex);
 		*out = pack;
 		return 0;
 	}
 
 	/* If we didn't find it, we need to create it */
 	if ((error = git_packfile_alloc(&pack, path)) < 0) {
-		git_mutex_unlock(&git__mwindow_mutex);
+		git_rwlock_wrunlock(&git__mwindow_mutex);
 		return error;
 	}
 
 	git_atomic_inc(&pack->refcount);
 
 	git_strmap_insert(git__pack_cache, pack->pack_name, pack, &error);
-	git_mutex_unlock(&git__mwindow_mutex);
+	git_rwlock_wrunlock(&git__mwindow_mutex);
 
 	if (error < 0) {
 		git_packfile_free(pack);
@@ -99,7 +99,7 @@ void git_mwindow_put_pack(struct git_pack_file *pack)
 	int count;
 	git_strmap_iter pos;
 
-	if (git_mutex_lock(&git__mwindow_mutex) < 0)
+	if (git_rwlock_wrlock(&git__mwindow_mutex) < 0)
 		return;
 
 	/* put before get would be a corrupted state */
@@ -115,20 +115,20 @@ void git_mwindow_put_pack(struct git_pack_file *pack)
 		git_packfile_free(pack);
 	}
 
-	git_mutex_unlock(&git__mwindow_mutex);
+	git_rwlock_wrunlock(&git__mwindow_mutex);
 	return;
 }
 
 void git_mwindow_free_all(git_mwindow_file *mwf)
 {
-	if (git_mutex_lock(&git__mwindow_mutex)) {
+	if (git_rwlock_wrlock(&git__mwindow_mutex)) {
 		giterr_set(GITERR_THREAD, "unable to lock mwindow mutex");
 		return;
 	}
 
 	git_mwindow_free_all_locked(mwf);
 
-	git_mutex_unlock(&git__mwindow_mutex);
+	git_rwlock_wrunlock(&git__mwindow_mutex);
 }
 
 /*
@@ -157,7 +157,7 @@ void git_mwindow_free_all_locked(git_mwindow_file *mwf)
 
 	while (mwf->windows) {
 		git_mwindow *w = mwf->windows;
-		assert(w->inuse_cnt == 0);
+		assert(git_atomic_get(&w->inuse_cnt) == 0);
 
 		ctl->mapped -= w->window_map.len;
 		ctl->open_windows--;
@@ -190,7 +190,7 @@ static void git_mwindow_scan_lru(
 	git_mwindow *w, *w_l;
 
 	for (w_l = NULL, w = mwf->windows; w; w = w->next) {
-		if (!w->inuse_cnt) {
+		if (git_atomic_get(&w->inuse_cnt) == 0) {
 			/*
 			 * If the current one is more recent than the last one,
 			 * store it in the output parameter. If lru_w is NULL,
@@ -323,15 +323,16 @@ unsigned char *mwindow_open(
 {
 	git_mwindow_ctl *ctl = &mem_ctl;
 	git_mwindow *w = *cursor;
+	int writelock = 0;
 
-	if (git_mutex_lock(&git__mwindow_mutex)) {
+	if (git_rwlock_rdlock(&git__mwindow_mutex)) {
 		giterr_set(GITERR_THREAD, "unable to lock mwindow mutex");
 		return NULL;
 	}
 
 	if (!w || !(git_mwindow_contains(w, offset) && git_mwindow_contains(w, offset + extra))) {
 		if (w) {
-			w->inuse_cnt--;
+		  git_atomic_dec(&w->inuse_cnt);
 		}
 
 		for (w = mwf->windows; w; w = w->next) {
@@ -345,9 +346,16 @@ unsigned char *mwindow_open(
 		 * one.
 		 */
 		if (!w) {
+			writelock = 1;
+			git_rwlock_rdunlock(&git__mwindow_mutex);
+			if (git_rwlock_wrlock(&git__mwindow_mutex)) {
+			  giterr_set(GITERR_THREAD, "unable to lock mwindow mutex");
+			  return NULL;
+			}
+
 			w = new_window(mwf, mwf->fd, mwf->size, offset, skiplimit);
 			if (w == NULL) {
-				git_mutex_unlock(&git__mwindow_mutex);
+				git_rwlock_wrunlock(&git__mwindow_mutex);
 				return NULL;
 			}
 			w->next = mwf->windows;
@@ -357,8 +365,18 @@ unsigned char *mwindow_open(
 
 	/* If we changed w, store it in the cursor */
 	if (w != *cursor) {
+	  /*
+		if (!writelock) {
+		  writelock = 1;
+		  git_rwlock_rdunlock(&git__mwindow_mutex);
+		  if (git_rwlock_wrlock(&git__mwindow_mutex)) {
+		    giterr_set(GITERR_THREAD, "unable to lock mwindow mutex");
+		    return NULL;
+		  }
+		}
+*/
 		w->last_used = ctl->used_ctr++;
-		w->inuse_cnt++;
+		git_atomic_inc(&w->inuse_cnt);
 		*cursor = w;
 	}
 
@@ -367,7 +385,12 @@ unsigned char *mwindow_open(
 	if (left)
 		*left = (unsigned int)(w->window_map.len - offset);
 
-	git_mutex_unlock(&git__mwindow_mutex);
+	if (writelock) {
+	  git_rwlock_wrunlock(&git__mwindow_mutex);
+	} else {
+	  git_rwlock_rdunlock(&git__mwindow_mutex);
+	}
+
 	return (unsigned char *) w->window_map.data + offset;
 }
 
@@ -396,19 +419,19 @@ int git_mwindow_file_register(git_mwindow_file *mwf)
 	git_mwindow_ctl *ctl = &mem_ctl;
 	int ret;
 
-	if (git_mutex_lock(&git__mwindow_mutex)) {
+	if (git_rwlock_wrlock(&git__mwindow_mutex)) {
 		giterr_set(GITERR_THREAD, "unable to lock mwindow mutex");
 		return -1;
 	}
 
 	if (ctl->windowfiles.length == 0 &&
 	    git_vector_init(&ctl->windowfiles, 8, NULL) < 0) {
-		git_mutex_unlock(&git__mwindow_mutex);
+		git_rwlock_wrunlock(&git__mwindow_mutex);
 		return -1;
 	}
 
 	ret = git_vector_insert(&ctl->windowfiles, mwf);
-	git_mutex_unlock(&git__mwindow_mutex);
+	git_rwlock_wrunlock(&git__mwindow_mutex);
 
 	return ret;
 }
@@ -419,30 +442,31 @@ void git_mwindow_file_deregister(git_mwindow_file *mwf)
 	git_mwindow_file *cur;
 	size_t i;
 
-	if (git_mutex_lock(&git__mwindow_mutex))
+	if (git_rwlock_wrlock(&git__mwindow_mutex))
 		return;
 
 	git_vector_foreach(&ctl->windowfiles, i, cur) {
 		if (cur == mwf) {
 			git_vector_remove(&ctl->windowfiles, i);
-			git_mutex_unlock(&git__mwindow_mutex);
+			git_rwlock_wrunlock(&git__mwindow_mutex);
 			return;
 		}
 	}
-	git_mutex_unlock(&git__mwindow_mutex);
+	git_rwlock_wrunlock(&git__mwindow_mutex);
 }
 
 void git_mwindow_close(git_mwindow **window)
 {
 	git_mwindow *w = *window;
 	if (w) {
-		if (git_mutex_lock(&git__mwindow_mutex)) {
+		if (git_rwlock_rdlock(&git__mwindow_mutex)) {
 			giterr_set(GITERR_THREAD, "unable to lock mwindow mutex");
 			return;
 		}
 
-		w->inuse_cnt--;
-		git_mutex_unlock(&git__mwindow_mutex);
+		git_atomic_dec(&w->inuse_cnt);
+		assert(git_atomic_get(&w->inuse_cnt) >= 0);
+		git_rwlock_rdunlock(&git__mwindow_mutex);
 		*window = NULL;
 	}
 }

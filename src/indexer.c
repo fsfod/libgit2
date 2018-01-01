@@ -20,7 +20,7 @@
 #include "zstream.h"
 #include "object.h"
 
-extern git_mutex git__mwindow_mutex;
+extern git_rwlock git__mwindow_mutex;
 
 #define UINT31_MAX (0x7FFFFFFF)
 
@@ -1145,12 +1145,12 @@ void git_indexer_free(git_indexer *idx)
 
 	git_vector_free_deep(&idx->deltas);
 
-	if (!git_mutex_lock(&git__mwindow_mutex)) {
+	if (!git_rwlock_wrlock(&git__mwindow_mutex)) {
 		if (!idx->pack_committed)
 			git_packfile_close(idx->pack, true);
 
 		git_packfile_free(idx->pack);
-		git_mutex_unlock(&git__mwindow_mutex);
+		git_rwlock_wrunlock(&git__mwindow_mutex);
 	}
 
 	git_hash_ctx_cleanup(&idx->trailer);

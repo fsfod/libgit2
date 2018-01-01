@@ -18,7 +18,7 @@ typedef struct git_mwindow {
 	git_map window_map;
 	git_off_t offset;
 	size_t last_used;
-	size_t inuse_cnt;
+	git_atomic inuse_cnt;
 } git_mwindow;
 
 typedef struct git_mwindow_file {

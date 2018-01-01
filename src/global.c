@@ -21,7 +21,7 @@
 #include "win32/w32_crtdbg_stacktrace.h"
 #endif
 
-git_mutex git__mwindow_mutex;
+git_rwlock git__mwindow_mutex;
 
 #define MAX_SHUTDOWN_CB 9
 
@@ -138,7 +138,7 @@ static int synchronized_threads_init(void)
 
 	git_threads_init();
 
-	if (git_mutex_init(&git__mwindow_mutex))
+	if (git_rwlock_init(&git__mwindow_mutex))
 		return -1;
 
 	error = init_common();
