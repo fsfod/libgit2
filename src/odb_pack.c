@@ -141,7 +141,7 @@ static int packfile_sort__cb(const void *a_, const void *b_);
 
 static int packfile_load__cb(void *_data, git_buf *path);
 
-static int pack_entry_find(struct git_pack_entry *e,
+int pack_entry_find(struct git_pack_entry *e,
 	struct pack_backend *backend, const git_oid *oid);
 
 /* Can find the offset of an object given

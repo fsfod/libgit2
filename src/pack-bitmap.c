@@ -259,13 +259,13 @@ static int load_bitmap_entries_v1(struct bitmap_index *index)
 		struct stored_bitmap *xor_bitmap = NULL;
 		uint32_t commit_idx_pos;
 		git_off_t offset;
-		git_oid* sha1;
+		git_oid* id;
 
 		commit_idx_pos = read_be32(index->map, &index->map_pos);
 		xor_offset = read_u8(index->map, &index->map_pos);
 		flags = read_u8(index->map, &index->map_pos);
 
-		if ((error = git_packfile_get_entry(&sha1, &offset, index->pack, commit_idx_pos)) < 0) {
+		if ((error = git_packfile_get_entry(&id, &offset, index->pack, commit_idx_pos)) < 0) {
 		  return error;
 		}
 
@@ -287,7 +287,7 @@ static int load_bitmap_entries_v1(struct bitmap_index *index)
 		}
 
 		recent_bitmaps[i % MAX_XOR_OFFSET] = store_bitmap(
-			index, bitmap, sha1, xor_bitmap, flags);
+			index, bitmap, id, xor_bitmap, flags);
 	}
 
 	return 0;
@@ -440,13 +440,33 @@ static inline int bitmap_position_packfile(git_oid *sha1)
 	if (!error)
 		return -1;
 
-	return find_revindex_position(bitmap_git.pack, offset);
+	return find_revindex_position(bitmap_git.pack, error);
 }
 
-static int bitmap_position(const unsigned char *sha1)
+static int bitmap_position(git_oid *sha1)
 {
 	int pos = bitmap_position_packfile(sha1);
 	return (pos >= 0) ? pos : bitmap_position_extended(sha1);
+}
+
+static inline uint32_t pack_name_hash(const char *name)
+{
+  uint32_t c, hash = 0;
+
+  if (!name)
+	return 0;
+
+  /*
+  * This effectively just creates a sortable number from the
+  * last sixteen non-whitespace characters. Last characters
+  * count "most", so things that end in ".c" sort together.
+  */
+  while ((c = *name++) != 0) {
+	if (isspace(c))
+	  continue;
+	hash = (hash >> 2) + (c << 24);
+  }
+  return hash;
 }
 
 static int ext_index_add_object(struct object *object, const char *name)
@@ -461,8 +481,8 @@ static int ext_index_add_object(struct object *object, const char *name)
 	if (hash_ret > 0) {
 		if (eindex->count >= eindex->alloc) {
 			eindex->alloc = (eindex->alloc + 16) * 3 / 2;
-			REALLOC_ARRAY(eindex->objects, eindex->alloc);
-			REALLOC_ARRAY(eindex->hashes, eindex->alloc);
+			git__reallocarray(eindex->objects, eindex->alloc, sizeof(void*));
+			git__reallocarray(eindex->hashes, eindex->alloc, sizeof(void*));
 		}
 
 		bitmap_pos = eindex->count;
@@ -482,7 +502,7 @@ static void show_object(struct object *object, const char *name, void *data)
 	struct bitmap *base = data;
 	int bitmap_pos;
 
-	bitmap_pos = bitmap_position(object->oid.hash);
+	bitmap_pos = bitmap_position(&object->oid);
 
 	if (bitmap_pos < 0)
 		bitmap_pos = ext_index_add_object(object, name);
@@ -517,24 +537,25 @@ static int add_to_include_set(struct include_data *data,
 	return 1;
 }
 
-static int should_include(struct commit *commit, void *_data)
+static int should_include(struct git_commit *commit, void *_data)
 {
 	struct include_data *data = _data;
 	int bitmap_pos;
-
-	bitmap_pos = bitmap_position(commit->object.oid.hash);
+	
+	bitmap_pos = bitmap_position(&commit->object.cached.oid);
 	if (bitmap_pos < 0)
 		bitmap_pos = ext_index_add_object((struct object *)commit, NULL);
 
-	if (!add_to_include_set(data, commit->object.oid.hash, bitmap_pos)) {
-		struct commit_list *parent = commit->parents;
+	if (!add_to_include_set(data, &commit->object.cached.oid, bitmap_pos)) {
+	  for(int i = 0; i != git_array_size(commit->parent_ids) ;i++){
+		struct git_oid *parent = git_array_get(commit->parent_ids, i);
 
-		while (parent) {
-			parent->item->object.flags |= SEEN;
-			parent = parent->next;
-		}
-
-		return 0;
+		//while (parent) {
+		 // parent->item->object.flags |= SEEN;
+		//  parent = parent->next;
+		//}
+	  }
+	  return 0;
 	}
 
 	return 1;
@@ -549,6 +570,7 @@ static struct bitmap *find_objects(struct rev_info *revs,
 
 	struct object_list *not_mapped = NULL;
 
+
 	/*
 	 * Go through all the roots for the walk. The ones that have bitmaps
 	 * on the bitmap index will be `or`ed together to form an initial
@@ -558,11 +580,11 @@ static struct bitmap *find_objects(struct rev_info *revs,
 	 * `not_mapped_list` for further processing.
 	 */
 	while (roots) {
-		struct object *object = roots->item;
+		struct git_pobject *object = roots->item;
 		roots = roots->next;
 
 		if (object->type == GIT_OBJ_COMMIT) {
-			khiter_t pos = kh_get_sha1(bitmap_git.bitmaps, object->oid.hash);
+			khiter_t pos = kh_get_sha1(bitmap_git.bitmaps, &object->id);
 
 			if (pos < kh_end(bitmap_git.bitmaps)) {
 				struct stored_bitmap *st = kh_value(bitmap_git.bitmaps, pos);
@@ -573,11 +595,11 @@ static struct bitmap *find_objects(struct rev_info *revs,
 				else
 					bitmap_or_ewah(base, or_with);
 
-				object->flags |= SEEN;
+				object->tagged = 1;
 				continue;
 			}
 		}
-
+		git_vector_insert()
 		object_list_insert(object, &not_mapped);
 	}
 
@@ -949,90 +971,6 @@ struct bitmap_test_data {
 	size_t seen;
 };
 
-static void test_show_object(struct object *object, const char *name,
-			     void *data)
-{
-	struct bitmap_test_data *tdata = data;
-	int bitmap_pos;
-
-	bitmap_pos = bitmap_position(object->oid.hash);
-	if (bitmap_pos < 0)
-		die("Object not in bitmap: %s\n", oid_to_hex(&object->oid));
-
-	bitmap_set(tdata->base, bitmap_pos);
-	display_progress(tdata->prg, ++tdata->seen);
-}
-
-static void test_show_commit(struct commit *commit, void *data)
-{
-	struct bitmap_test_data *tdata = data;
-	int bitmap_pos;
-
-	bitmap_pos = bitmap_position(commit->object.oid.hash);
-	if (bitmap_pos < 0)
-		die("Object not in bitmap: %s\n", oid_to_hex(&commit->object.oid));
-
-	bitmap_set(tdata->base, bitmap_pos);
-	display_progress(tdata->prg, ++tdata->seen);
-}
-
-void test_bitmap_walk(struct rev_info *revs)
-{
-	struct object *root;
-	struct bitmap *result = NULL;
-	khiter_t pos;
-	size_t result_popcnt;
-	struct bitmap_test_data tdata;
-
-	if (prepare_bitmap_git())
-		die("failed to load bitmap indexes");
-
-	if (revs->pending.nr != 1)
-		die("you must specify exactly one commit to test");
-
-	fprintf(stderr, "Bitmap v%d test (%d entries loaded)\n",
-		bitmap_git.version, bitmap_git.entry_count);
-
-	root = revs->pending.objects[0].item;
-	pos = kh_get_sha1(bitmap_git.bitmaps, root->oid.hash);
-
-	if (pos < kh_end(bitmap_git.bitmaps)) {
-		struct stored_bitmap *st = kh_value(bitmap_git.bitmaps, pos);
-		struct ewah_bitmap *bm = lookup_stored_bitmap(st);
-
-		fprintf(stderr, "Found bitmap for %s. %d bits / %08x checksum\n",
-			oid_to_hex(&root->oid), (int)bm->bit_size, ewah_checksum(bm));
-
-		result = ewah_to_bitmap(bm);
-	}
-
-	if (result == NULL)
-		die("Commit %s doesn't have an indexed bitmap", oid_to_hex(&root->oid));
-
-	revs->tag_objects = 1;
-	revs->tree_objects = 1;
-	revs->blob_objects = 1;
-
-	result_popcnt = bitmap_popcount(result);
-
-	if (prepare_revision_walk(revs))
-		die("revision walk setup failed");
-
-	tdata.base = bitmap_new();
-	tdata.prg = start_progress("Verifying bitmap entries", result_popcnt);
-	tdata.seen = 0;
-
-	traverse_commit_list(revs, &test_show_commit, &test_show_object, &tdata);
-
-	stop_progress(&tdata.prg);
-
-	if (bitmap_equals(result, tdata.base))
-		fprintf(stderr, "OK!\n");
-	else
-		fprintf(stderr, "Mismatch!\n");
-
-	bitmap_free(result);
-}
 
 static int rebuild_bitmap(uint32_t *reposition,
 			  struct ewah_bitmap *source,
@@ -1082,7 +1020,7 @@ int rebuild_existing_bitmaps(struct packing_data *mapping,
 		return -1;
 
 	num_objects = bitmap_git.pack->num_objects;
-	reposition = xcalloc(num_objects, sizeof(uint32_t));
+	reposition = git__calloc(num_objects, sizeof(uint32_t));
 
 	for (i = 0; i < num_objects; ++i) {
 		const unsigned char *sha1;
@@ -1109,7 +1047,7 @@ int rebuild_existing_bitmaps(struct packing_data *mapping,
 					    lookup_stored_bitmap(stored),
 					    rebuild)) {
 				hash_pos = kh_put_sha1(reused_bitmaps,
-						       stored->sha1,
+						       &stored->sha1,
 						       &hash_ret);
 				kh_value(reused_bitmaps, hash_pos) =
 					bitmap_to_ewah(rebuild);

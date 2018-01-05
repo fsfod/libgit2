@@ -305,12 +305,20 @@ static int pack_index_check(const char *path, struct git_pack_file *p)
 		}
 	}
 
+	index = p->index_map.data;
+
+	if (p->index_version > 1) {
+	  index += 8;
+	}
+	index += 4 * 256;
+
+	p->index_entries = index;
 	p->num_objects = nr;
 	p->index_version = version;
 	return 0;
 }
 
-static int pack_index_open(struct git_pack_file *p)
+int pack_index_open(struct git_pack_file *p)
 {
 	int error = 0;
 	size_t name_len;
@@ -1463,6 +1471,55 @@ int git_packfile_foreach_entry2(struct git_pack_file *p, git_pack_foreach_cb cb,
   }
 
   return 0;
+}
+
+int git_pack_find_oid_index(
+  struct git_pack_file *p,
+  const git_oid *oid)
+{
+  const uint32_t *level1_ofs;
+  const unsigned char *index;
+  unsigned hi, lo, stride;
+  int pos, found = 0;
+  git_off_t offset;
+  const unsigned char *current = 0;
+
+
+  if (p->index_version == -1) {
+	int error;
+
+	if ((error = pack_index_open(p)) < 0)
+	  return error;
+	assert(p->index_map.data);
+  }
+
+  index = p->index_map.data;
+  level1_ofs = p->index_map.data;
+
+  if (p->index_version > 1) {
+	level1_ofs += 2;
+	index += 8;
+  }
+
+  index += 4 * 256;
+  hi = ntohl(level1_ofs[(int)oid->id[0]]);
+  lo = ((oid->id[0] == 0x0) ? 0 : ntohl(level1_ofs[(int)oid->id[0] - 1]));
+
+  if (p->index_version > 1) {
+	stride = 20;
+  } else {
+	stride = 24;
+	index += 4;
+  }
+
+  #ifdef INDEX_DEBUG_LOOKUP
+  printf("%02x%02x%02x... lo %u hi %u nr %d\n",
+	short_oid->id[0], short_oid->id[1], short_oid->id[2], lo, hi, p->num_objects);
+  #endif
+
+  pos = sha1_position(index, stride, lo, hi, oid->id);
+
+  return pos;
 }
 
 static int pack_entry_find_offset(
