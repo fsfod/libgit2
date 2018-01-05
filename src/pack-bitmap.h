@@ -13,6 +13,33 @@ struct bitmap_disk_header {
 	unsigned char checksum[20];
 };
 
+#define __kh_oid_cmp(a, b) (hashcmp(a, b) == 0)
+
+/*
+* Converts a cryptographic hash (e.g. SHA-1) into an int-sized hash code
+* for use in hash tables. Cryptographic hashes are supposed to have
+* uniform distribution, so in contrast to `memhash()`, this just copies
+* the first `sizeof(int)` bytes without shuffling any bits. Note that
+* the results will be different on big-endian and little-endian
+* platforms, so they should not be stored or transferred over the net.
+*/
+static inline unsigned int sha1hash(const unsigned char *sha1)
+{
+  /*
+  * Equivalent to 'return *(unsigned int *)sha1;', but safe on
+  * platforms that don't support unaligned reads.
+  */
+  unsigned int hash;
+  memcpy(&hash, sha1, sizeof(hash));
+  return hash;
+}
+
+KHASH_INIT(sha1, git_oid *, void *, 1, sha1hash, git_oid__hashcmp)
+typedef kh_sha1_t khash_sha1;
+
+KHASH_INIT(sha1_pos, git_oid*, int, 1, sha1hash, git_oid__hashcmp)
+typedef kh_sha1_pos_t khash_sha1_pos;
+
 static const char BITMAP_IDX_SIGNATURE[] = {'B', 'I', 'T', 'M'};
 
 #define NEEDS_BITMAP (1u<<22)
@@ -28,10 +55,10 @@ enum pack_bitmap_flags {
 
 typedef int (*show_reachable_fn)(
 	const struct object_id *oid,
-	enum object_type type,
+	enum git_otype type,
 	int flags,
 	uint32_t hash,
-	struct packed_git *found_pack,
+	struct git_pack_file *found_pack,
 	off_t found_offset);
 
 int prepare_bitmap_git(void);

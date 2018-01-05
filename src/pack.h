@@ -89,6 +89,7 @@ struct git_pack_file {
 	git_mwindow_file mwf;
 	git_mwindow* wholefile;
 	git_map index_map;
+	git_map bitmap_map;
 	git_mutex lock; /* protect updates to mwf and index_map */
 	git_atomic refcount;
 
@@ -97,6 +98,7 @@ struct git_pack_file {
 	git_oid *bad_object_sha1; /* array of git_oid */
 
 	int index_version;
+	int bitmap_version;
 	git_time_t mtime;
 	unsigned pack_local:1, pack_keep:1, has_cache:1;
 	git_oidmap *idx_cache;
