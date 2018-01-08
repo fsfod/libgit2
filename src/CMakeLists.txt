@@ -370,7 +370,8 @@ ENDIF()
 FILE(GLOB SRC_GIT2 *.c *.h
 	streams/*.c streams/*.h
 	transports/*.c transports/*.h
-	xdiff/*.c xdiff/*.h)
+	xdiff/*.c xdiff/*.h
+	ewah/*.c ewah/*.h)
 
 # Determine architecture of the machine
 IF (CMAKE_SIZEOF_VOID_P EQUAL 8)
