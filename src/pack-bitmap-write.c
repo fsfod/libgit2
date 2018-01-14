@@ -1,18 +1,14 @@
+#include "common.h"
 #include "cache.h"
 #include "commit.h"
 #include "tag.h"
 #include "diff.h"
-#include "revision.h"
-#include "list-objects.h"
-#include "progress.h"
-#include "pack-revindex.h"
 #include "pack.h"
 #include "pack-bitmap.h"
-#include "sha1-lookup.h"
 #include "pack-objects.h"
 
 struct bitmapped_commit {
-	struct commit *commit;
+	struct git_commit *commit;
 	struct ewah_bitmap *bitmap;
 	struct ewah_bitmap *write_as;
 	int flags;
@@ -45,6 +41,8 @@ void bitmap_writer_show_progress(int show)
 	writer.show_progress = show;
 }
 
+#if 0
+
 /**
  * Build the initial type index for the packfile
  */
@@ -59,16 +57,16 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 	writer.tags = ewah_new();
 
 	for (i = 0; i < index_nr; ++i) {
-		struct object_entry *entry = (struct object_entry *)index[i];
+		struct git_pobject *entry = (struct object_entry *)index[i];
 		enum object_type real_type;
 
 		entry->in_pack_pos = i;
 
 		switch (entry->type) {
-		case OBJ_COMMIT:
-		case OBJ_TREE:
-		case OBJ_BLOB:
-		case OBJ_TAG:
+		case GIT_OBJ_COMMIT:
+		case GIT_OBJ_TREE:
+		case GIT_OBJ_BLOB:
+		case GIT_OBJ_TAG:
 			real_type = entry->type;
 			break;
 
@@ -79,19 +77,19 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 		}
 
 		switch (real_type) {
-		case OBJ_COMMIT:
+		case GIT_OBJ_COMMIT:
 			ewah_set(writer.commits, i);
 			break;
 
-		case OBJ_TREE:
+		case GIT_OBJ_TREE:
 			ewah_set(writer.trees, i);
 			break;
 
-		case OBJ_BLOB:
+		case GIT_OBJ_BLOB:
 			ewah_set(writer.blobs, i);
 			break;
 
-		case OBJ_TAG:
+		case GIT_OBJ_TAG:
 			ewah_set(writer.tags, i);
 			break;
 
@@ -109,11 +107,11 @@ void bitmap_writer_build_type_index(struct pack_idx_entry **index,
 static struct object **seen_objects;
 static unsigned int seen_objects_nr, seen_objects_alloc;
 
-static inline void push_bitmapped_commit(struct commit *commit, struct ewah_bitmap *reused)
+static inline void push_bitmapped_commit(struct git_commit *commit, struct ewah_bitmap *reused)
 {
 	if (writer.selected_nr >= writer.selected_alloc) {
 		writer.selected_alloc = (writer.selected_alloc + 32) * 2;
-		REALLOC_ARRAY(writer.selected, writer.selected_alloc);
+		git__reallocarray(writer.selected, writer.selected_alloc, sizeof(struct bitmapped_commit));
 	}
 
 	writer.selected[writer.selected_nr].commit = commit;
@@ -157,16 +155,16 @@ static void show_object(struct object *object, const char *name, void *data)
 	mark_as_seen(object);
 }
 
-static void show_commit(struct commit *commit, void *data)
+static void show_commit(struct git_commit *commit, void *data)
 {
 	mark_as_seen((struct object *)commit);
 }
 
 static int
-add_to_include_set(struct bitmap *base, struct commit *commit)
+add_to_include_set(struct bitmap *base, struct git_commit *commit)
 {
 	khiter_t hash_pos;
-	uint32_t bitmap_pos = find_object_pos(commit->object.oid.hash);
+	uint32_t bitmap_pos = find_object_pos(commit->object->cached->oid);
 
 	if (bitmap_get(base, bitmap_pos))
 		return 0;
@@ -183,12 +181,12 @@ add_to_include_set(struct bitmap *base, struct commit *commit)
 }
 
 static int
-should_include(struct commit *commit, void *_data)
+should_include(struct git_commit *commit, void *_data)
 {
 	struct bitmap *base = _data;
 
 	if (!add_to_include_set(base, commit)) {
-		struct commit_list *parent = commit->parents;
+		struct git_commit_list *parent = commit->parents;
 
 		mark_as_seen((struct object *)commit);
 
@@ -351,9 +349,9 @@ static inline unsigned int next_commit_index(unsigned int idx)
 
 static int date_compare(const void *_a, const void *_b)
 {
-	struct commit *a = *(struct commit **)_a;
-	struct commit *b = *(struct commit **)_b;
-	return (long)b->date - (long)a->date;
+	struct git_commit *a = *(struct git_commit **)_a;
+	struct git_commit *b = *(struct git_commit **)_b;
+	return (long)b->author->when.time - (long)a->author->when.time;
 }
 
 void bitmap_writer_reuse_bitmaps(struct packing_data *to_pack)
@@ -365,7 +363,7 @@ void bitmap_writer_reuse_bitmaps(struct packing_data *to_pack)
 	rebuild_existing_bitmaps(to_pack, writer.reused, writer.show_progress);
 }
 
-static struct ewah_bitmap *find_reused_bitmap(const unsigned char *sha1)
+static struct ewah_bitmap *find_reused_bitmap(const git_oid *sha1)
 {
 	khiter_t hash_pos;
 
@@ -379,7 +377,7 @@ static struct ewah_bitmap *find_reused_bitmap(const unsigned char *sha1)
 	return kh_value(writer.reused, hash_pos);
 }
 
-void bitmap_writer_select_commits(struct commit **indexed_commits,
+void bitmap_writer_select_commits(struct git_commit **indexed_commits,
 				  unsigned int indexed_commits_nr,
 				  int max_bitmaps)
 {
@@ -398,7 +396,7 @@ void bitmap_writer_select_commits(struct commit **indexed_commits,
 
 	for (;;) {
 		struct ewah_bitmap *reused_bitmap = NULL;
-		struct commit *chosen = NULL;
+		struct git_commit *chosen = NULL;
 
 		next = next_commit_index(i);
 
@@ -412,14 +410,14 @@ void bitmap_writer_select_commits(struct commit **indexed_commits,
 
 		if (next == 0) {
 			chosen = indexed_commits[i];
-			reused_bitmap = find_reused_bitmap(chosen->object.oid.hash);
+			reused_bitmap = find_reused_bitmap(&chosen->object.cached.oid);
 		} else {
 			chosen = indexed_commits[i + next];
 
 			for (j = 0; j <= next; ++j) {
-				struct commit *cm = indexed_commits[i + j];
+				struct git_commit *cm = indexed_commits[i + j];
 
-				reused_bitmap = find_reused_bitmap(cm->object.oid.hash);
+				reused_bitmap = find_reused_bitmap(&cm->object.cached.oid);
 				if (reused_bitmap || (cm->object.flags & NEEDS_BITMAP) != 0) {
 					chosen = cm;
 					break;
@@ -545,3 +543,5 @@ void bitmap_writer_finish(struct pack_idx_entry **index,
 
 	strbuf_release(&tmp_file);
 }
+
+#endif

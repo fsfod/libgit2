@@ -31,7 +31,7 @@ typedef struct git_pobject {
 	git_oid id;
 	git_otype type;
 	git_off_t offset;
-
+	git_off_t in_pack_pos;
 	size_t size;
 
 	unsigned int hash; /* name hint hash */
