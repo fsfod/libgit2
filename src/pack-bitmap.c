@@ -1,3 +1,4 @@
+#include "common.h"
 #include "git2.h"
 #include "cache.h"
 #include "commit.h"
@@ -58,7 +59,7 @@ struct object {
  * If there is more than one bitmap index available (e.g. because of alternates),
  * the active bitmap index is the largest one.
  */
-static struct bitmap_index {
+struct bitmap_index {
 	/* Packfile to which this bitmap index belongs to */
 	struct git_pack_file *pack;
 
@@ -117,7 +118,9 @@ static struct bitmap_index {
 
 	unsigned loaded : 1;
 
-} bitmap_git;
+} bitmap_index;
+
+//static struct bitmap_index bitmap_git;
 
 static struct ewah_bitmap *lookup_stored_bitmap(struct stored_bitmap *st)
 {
@@ -233,6 +236,8 @@ static struct stored_bitmap *store_bitmap(struct bitmap_index *index,
 	return stored;
 }
 
+#define get_be32(p)	ntohl(*(unsigned int *)(p))
+
 static inline uint32_t read_be32(const unsigned char *buffer, size_t *pos)
 {
 	uint32_t result = get_be32(buffer + *pos);
@@ -269,6 +274,10 @@ static int load_bitmap_entries_v1(struct bitmap_index *index)
 		  return error;
 		}
 
+		char idstr[128];
+		git_oid_tostr(&idstr, 128, id);
+		printf("oid: %s\n", idstr);
+
 		if ((error = read_bitmap_1(index, &bitmap)) < 0)
 			return error;
 
@@ -294,10 +303,11 @@ static int load_bitmap_entries_v1(struct bitmap_index *index)
 }
 
 int pack_index_open(struct git_pack_file *p);
+static int load_pack_bitmap(struct bitmap_index* index);
 
 static int open_pack_bitmap(struct git_pack_file *p, const char* idx_name)
 {
-	uint32_t version, nr, i, *index;
+	uint32_t version, nr, i;
 	git_file fd;
 	struct stat st;
 	void *idx_map;
@@ -328,23 +338,26 @@ static int open_pack_bitmap(struct git_pack_file *p, const char* idx_name)
 
 	error = git_futils_mmap_ro(&p->bitmap_map, fd, 0, idx_size);
 
-	p_close(fd);
+	//p_close(fd);
 
 	if (error < 0)
 	  return error;
 
-	bitmap_git.pack = p;
-	bitmap_git.map_size = st.st_size;
-	bitmap_git.map = p->bitmap_map.data;
-	bitmap_git.map_pos = 0;
-	close(fd);
+	struct bitmap_index *index = git__calloc(1, sizeof(bitmap_index));
+	index->pack = p;
+	index->map_size = st.st_size;
+	index->map = p->bitmap_map.data;
+	index->map_pos = 0;
+	//close(fd);
 
-	if (load_bitmap_header(p, &bitmap_git) < 0) {
+	if (load_bitmap_header(p, index) < 0) {
 		git_futils_mmap_free(&p->bitmap_map);
-		bitmap_git.map = NULL;
-		bitmap_git.map_size = 0;
+		index->map = NULL;
+		index->map_size = 0;
 		return -1;
 	}
+
+	load_pack_bitmap(index);
 
 	return 0;
 }
@@ -386,31 +399,31 @@ int pack_bitmap_open(struct git_pack_file *p)
   return error;
 }
 
-static int load_pack_bitmap(void)
+static int load_pack_bitmap(struct bitmap_index* index)
 {
-	assert(bitmap_git.map && !bitmap_git.loaded);
+	assert(index->map && !index->loaded);
 
-	bitmap_git.bitmaps = kh_init_sha1();
-	bitmap_git.ext_index.positions = kh_init_sha1_pos();
-	//load_pack_revindex(bitmap_git.pack);
-	//bitmap_git.pack->index_map
+	index->bitmaps = kh_init_sha1();
+	index->ext_index.positions = kh_init_sha1_pos();
+	//load_pack_revindex(bitmapindex.pack);
+	//index.pack->index_map
 
-	if (read_bitmap_1(&bitmap_git, &bitmap_git.commits) < 0 ||
-		  read_bitmap_1(&bitmap_git, &bitmap_git.trees) < 0 ||
-		  read_bitmap_1(&bitmap_git, &bitmap_git.blobs) < 0 ||
-		  read_bitmap_1(&bitmap_git, &bitmap_git.tags) < 0)
+	if (read_bitmap_1(index, &index->commits) < 0 ||
+		read_bitmap_1(index, &index->trees) < 0 ||
+		read_bitmap_1(index, &index->blobs) < 0 ||
+		read_bitmap_1(index, &index->tags) < 0)
 		goto failed;
 
-	if (load_bitmap_entries_v1(&bitmap_git) < 0)
+	if (load_bitmap_entries_v1(index) < 0)
 		goto failed;
 
-	bitmap_git.loaded = 1;
+	index->loaded = 1;
 	return 0;
 
 failed:
-	munmap(bitmap_git.map, bitmap_git.map_size);
-	bitmap_git.map = NULL;
-	bitmap_git.map_size = 0;
+	p_munmap(index->map);
+	index->map = NULL;
+	index->map_size = 0;
 	return -1;
 }
 
@@ -420,19 +433,20 @@ struct include_data {
 	struct bitmap *seen;
 };
 
-static inline int bitmap_position_extended(git_oid *sha1)
+static inline int bitmap_position_extended(struct bitmap_index *index, git_oid *sha1)
 {
-	khash_sha1_pos *positions = bitmap_git.ext_index.positions;
+	khash_sha1_pos *positions = index->ext_index.positions;
 	khiter_t pos = kh_get_sha1_pos(positions, sha1);
 
 	if (pos < kh_end(positions)) {
 		int bitmap_pos = kh_value(positions, pos);
-		return bitmap_pos + bitmap_git.pack->num_objects;
+		return bitmap_pos + index->pack->num_objects;
 	}
 
 	return -1;
 }
 
+#if 0
 static inline int bitmap_position_packfile(git_oid *sha1)
 {
 	struct git_pack_cache_entry *e;
@@ -1063,3 +1077,4 @@ int rebuild_existing_bitmaps(struct packing_data *mapping,
 	bitmap_free(rebuild);
 	return 0;
 }
+#endif

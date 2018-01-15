@@ -1265,6 +1265,7 @@ int git_packfile_alloc(struct git_pack_file **pack_out, const char *path)
 	p->pack_local = 1;
 	p->mtime = (git_time_t)st.st_mtime;
 	p->index_version = -1;
+	p->bitmap_version = -1;
 
 	if (git_mutex_init(&p->lock)) {
 		giterr_set(GITERR_OS, "failed to initialize packfile mutex");

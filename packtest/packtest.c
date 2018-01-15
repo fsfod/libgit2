@@ -108,6 +108,7 @@ int walkpack_backend(git_odb_backend* obd_backend)
   for (i = 0; i != packbackends; i++) {
 	git_packodb_getpack(&p, backend, i);
 	objcount = git_packfile_obj_count(p);
+	pack_bitmap_open(p);
 	//reset_counts();
 #if 1
 	git_thread threads[4] = {0};

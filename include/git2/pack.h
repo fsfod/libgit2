@@ -248,6 +248,8 @@ GIT_EXTERN(int) git_packfile_unpack(struct git_rawobj *obj, struct git_pack_file
 GIT_EXTERN(void*) git_packfile_map_wholefile(struct git_pack_file *p);
 GIT_EXTERN(int) git_packfile_unmap_wholefile(struct git_pack_file *p, struct git_mwindow* window);
 
+GIT_EXTERN(int) pack_bitmap_open(struct git_pack_file *p);
+
 /** @} */
 GIT_END_DECL
 #endif
