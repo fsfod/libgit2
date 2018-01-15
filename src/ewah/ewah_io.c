@@ -136,7 +136,7 @@ int ewah_read_mmap(struct ewah_bitmap *self, const void *map, size_t len)
 	self->buffer_size = self->alloc_size = ntohl(*(int32_t*)ptr);
 	ptr += sizeof(uint32_t);
 
-	git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
+	self->buffer = git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
 
 	/*
 	 * Copy the raw data for the bitmap as a whole chunk;
@@ -178,7 +178,7 @@ int ewah_deserialize(struct ewah_bitmap *self, int fd)
 		return -1;
 
 	self->buffer_size = self->alloc_size = (size_t)ntohl(word_count);
-	git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
+	self->buffer = git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
 
 	/** 64 bit x N -- compressed words */
 	buffer = self->buffer;

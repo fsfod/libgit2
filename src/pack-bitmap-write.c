@@ -111,7 +111,7 @@ static inline void push_bitmapped_commit(struct git_commit *commit, struct ewah_
 {
 	if (writer.selected_nr >= writer.selected_alloc) {
 		writer.selected_alloc = (writer.selected_alloc + 32) * 2;
-		git__reallocarray(writer.selected, writer.selected_alloc, sizeof(struct bitmapped_commit));
+		writer.selected = git__reallocarray(writer.selected, writer.selected_alloc, sizeof(struct bitmapped_commit));
 	}
 
 	writer.selected[writer.selected_nr].commit = commit;

@@ -481,8 +481,8 @@ static int ext_index_add_object(struct object *object, const char *name)
 	if (hash_ret > 0) {
 		if (eindex->count >= eindex->alloc) {
 			eindex->alloc = (eindex->alloc + 16) * 3 / 2;
-			git__reallocarray(eindex->objects, eindex->alloc, sizeof(void*));
-			git__reallocarray(eindex->hashes, eindex->alloc, sizeof(void*));
+			eindex->objects = git__reallocarray(eindex->objects, eindex->alloc, sizeof(void*));
+			eindex->hashes = git__reallocarray(eindex->hashes, eindex->alloc, sizeof(void*));
 		}
 
 		bitmap_pos = eindex->count;

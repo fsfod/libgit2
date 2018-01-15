@@ -37,7 +37,7 @@ void bitmap_set(struct bitmap *self, size_t pos)
 	if (block >= self->word_alloc) {
 		size_t old_size = self->word_alloc;
 		self->word_alloc = block * 2;
-		git__reallocarray(self->words, sizeof(eword_t), self->word_alloc);
+		self->words = git__reallocarray(self->words, sizeof(eword_t), self->word_alloc);
 		memset(self->words + old_size, 0x0,
 			(self->word_alloc - old_size) * sizeof(eword_t));
 	}
@@ -103,7 +103,7 @@ struct ewah_bitmap *bitmap_to_ewah(struct bitmap *bitmap)
 				alloc = (nr); \
 			else \
 				alloc = alloc_nr(alloc); \
-			git__reallocarray(x, sizeof(*(x)), alloc); \
+			x = git__reallocarray(x, sizeof(*(x)), alloc); \
 		} \
 	} while (0)
 
@@ -146,7 +146,7 @@ void bitmap_or_ewah(struct bitmap *self, struct ewah_bitmap *other)
 
 	if (self->word_alloc < other_final) {
 		self->word_alloc = other_final;
-		git__reallocarray(self->words, sizeof(eword_t), self->word_alloc);
+		self->words = git__reallocarray(self->words, sizeof(eword_t), self->word_alloc);
 		memset(self->words + original_size, 0x0,
 			(self->word_alloc - original_size) * sizeof(eword_t));
 	}

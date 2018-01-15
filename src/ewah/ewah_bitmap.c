@@ -38,7 +38,7 @@ static inline void buffer_grow(struct ewah_bitmap *self, size_t new_size)
 		return;
 
 	self->alloc_size = new_size;
-	git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
+	self->buffer = git__reallocarray(self->buffer, sizeof(eword_t), self->alloc_size);
 	self->rlw = self->buffer + (rlw_offset / sizeof(eword_t));
 }
 
@@ -206,6 +206,8 @@ size_t ewah_add(struct ewah_bitmap *self, eword_t word)
 	return add_literal(self, word);
 }
 
+#define DIV_ROUND_UP(n,d) (((n) + (d) - 1) / (d))
+
 void ewah_set(struct ewah_bitmap *self, size_t i)
 {
 	const size_t dist =
@@ -280,9 +282,9 @@ struct ewah_bitmap *ewah_new(void)
 {
 	struct ewah_bitmap *self;
 
-	self = xmalloc(sizeof(struct ewah_bitmap));
+	self = git__malloc(sizeof(struct ewah_bitmap));
 	self->alloc_size = 32;
-	ALLOC_ARRAY(self->buffer, self->alloc_size);
+	self->buffer = git__mallocarray(self->alloc_size, sizeof(eword_t));
 
 	ewah_clear(self);
 	return self;
